@@ -12,7 +12,7 @@ const rangosAura = [
   { limite: 700, nombre: "Guarriple" },
   { limite: 1000, nombre: "Menchu" },
   { limite: 1350, nombre: "Buscapesetas" },
-  { limite: 1750, font: "", nombre: "Vidapadremanzano" },
+  { limite: 1750, nombre: "Vidapadremanzano" },
   { limite: 2200, nombre: "Alfonshow" },
   { limite: 2700, nombre: "Makapeta" },
   { limite: 3250, nombre: "Maleta" },
@@ -31,7 +31,7 @@ const rangosAura = [
   { limite: 16200, nombre: "El Chache" },
   { limite: 17800, nombre: "Dani Manzano" },
   { limite: 19500, nombre: "Oh Felipe" },
-  { limite: 21300, nombre: "Feliciano" },
+  { limite: 21300, font: "", nombre: "Feliciano" },
   { limite: 23200, nombre: "Brocheja Jefecito" },
   { limite: 25200, nombre: "Luisal" },
   { limite: 27300, nombre: "Farola" },
@@ -81,7 +81,6 @@ const rankingOficial = [
 // 3. COMPONENTE PRINCIPAL
 // ==========================================
 export default function App() {
-  // Estados de control de la App
   const [sesionIniciada, setSesionIniciada] = useState(false);
   const [usuarioInput, setUsuarioInput] = useState('');
   const [pinInput, setPinInput] = useState('');
@@ -94,7 +93,7 @@ export default function App() {
   // Cálculo de líder dinámico
   const liderActual = rankingOficial.find(jugador => jugador.top === 1) || rankingOficial[0];
 
-  // Búsqueda de estadísticas del usuario que ha iniciado sesión (con seguridad optional chaining)
+  // Búsqueda de estadísticas del usuario que ha iniciado sesión
   const datosUsuarioLogueado = rankingOficial.find(
     jugador => jugador.nombre.toLowerCase() === usuarioLogueado?.toLowerCase()
   ) || { top: '?', actual: 0, total: 0, emoji: "🥚" };
@@ -145,7 +144,7 @@ export default function App() {
       return;
     }
 
-    // Petición ilike (insensible a mayúsculas/minúsculas)
+    // Buscamos ignorando mayúsculas/minúsculas con "ilike"
     const { data, error: dbError } = await supabase
       .from('usuarios')
       .select('*')
@@ -160,8 +159,9 @@ export default function App() {
     if (!data || data.length === 0) {
       setError('Usuario o PIN incorrectos');
     } else {
-      // Guardamos data[0].usuario porque no hay columna "nombre_real" en la tabla
-      setUsuarioLogueado(data[0].usuario);
+      // NOTA DE SEGURIDAD: Intentamos sacar primero 'nombre_real', si no existe tiramos de 'usuario'
+      const nombreMostrar = data[0].nombre_real || data[0].usuario;
+      setUsuarioLogueado(nombreMostrar);
       setSesionIniciada(true);
       setSeccionActiva('menu'); // Navega automáticamente al menú al loguearse
     }
@@ -439,7 +439,6 @@ export default function App() {
           </div>
         </main>
       )}
-
     </div>
   );
 }
