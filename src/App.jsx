@@ -258,7 +258,7 @@ export default function App() {
         )}
         
         <h1 className="text-2xl font-extrabold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-200 uppercase pt-8">
-          Alto Tribunal del Aura
+          Alto Tribunal del Aura Supremo
         </h1>
         <p className="text-[10px] text-gray-500 mt-1 tracking-widest uppercase">
           Usuario: {usuarioLogueado}
