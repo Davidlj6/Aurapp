@@ -12,6 +12,7 @@ function obtenerColorTop(posicion) {
   return "text-gray-500";
 }
 
+const imagenesUsuarios = import.meta.glob('../assets/users/*.png', { eager: true });
 function esSemanaActual(fechaString) {
   const hoy = new Date();
   const fechaEvaluar = new Date(fechaString);
@@ -41,6 +42,7 @@ export default function App() {
   const [rankingOficial, setRankingOficial] = useState([]);
   const [listaTiposFiesta, setListaTiposFiesta] = useState([]); 
   const [listaRangos, setListaRangos] = useState([]); // <-- NUEVO ESTADO PARA LOS RANGOS DE LA DB
+  const [statsTotales, setStatsTotales] = useState({ cubatas: 0, cervezas: 0, chupitos: 0, aguas: 0, refrescos: 0 }); // <-- NUEVO ESTADO PARA STATS
   const [cargandoDatos, setCargandoDatos] = useState(true);
   const [seccionActiva, setSeccionActiva] = useState('menu');
 
@@ -89,67 +91,111 @@ export default function App() {
   };
 
   // Inicialización de datos colectivos
-  const inicializarDatos = async () => {
-    try {
-      setCargandoDatos(true);
-      
-      // 1. Cargar Rangos desde la Base de Datos (Ordenados por límite ascendente)
-      const { data: rangosData, error: rangosError } = await supabase
-        .from('rangos_aura')
-        .select('*')
-        .order('limite', { ascending: true });
+const inicializarDatos = async () => {
+  try {
+    setCargandoDatos(true);
+    
+    // 1. Cargar Rangos desde la Base de Datos
+    const { data: rangosData, error: rangosError } = await supabase
+      .from('rangos_aura')
+      .select('*')
+      .order('limite', { ascending: true });
 
-      if (rangosError) throw rangosError;
-      setListaRangos(rangosData || []);
-      
-      // 2. Cargar Ranking de Usuarios
-      const { data: usersData, error: dbError } = await supabase
-        .from('usuarios')
-        .select('*')
-        .order('puntos_totales', { ascending: false });
+    if (rangosError) throw rangosError;
+    setListaRangos(rangosData || []);
+    
+    // 2. Cargar Ranking de Usuarios
+    const { data: usersData, error: dbError } = await supabase
+      .from('usuarios')
+      .select('*')
+      .order('puntos_totales', { ascending: false });
 
-      if (dbError) throw dbError;
+    if (dbError) throw dbError;
 
-      // Pasamos rangosData directamente para asegurar que calcule con los datos frescos de esta query
-      const rankingMapeado = (usersData || []).map((user, index) => {
-        const totalPuntos = user.puntos_totales ?? 0;
-        const rangoCalculado = obtenerRango(totalPuntos, rangosData || []);
-        return {
-          top: index + 1,
-          id: user.id, 
-          nombre: user.usuario, 
-          usuarioKey: user.usuario, 
-          actual: user.puntos_semanales ?? 0, 
-          total: totalPuntos,              
-          emoji: rangoCalculado.emoji,      
-          color: obtenerColorTop(index + 1) 
-        };
-      });
-      setRankingOficial(rankingMapeado);
+    // Mapeamos el ranking conectando los avatares directamente a Supabase Storage
+    const rankingMapeado = (usersData || []).map((user, index) => {
+      const totalPuntos = user.puntos_totales ?? 0;
+      const rangoCalculado = obtenerRango(totalPuntos, rangosData || []);
 
-      // 3. Cargar Tipos de Fiesta desde la tabla
-      const { data: fiestaData, error: fiestaError } = await supabase
-        .from('tipos_fiesta')
-        .select('*')
-        .order('id', { ascending: true });
+      return {
+        top: index + 1,
+        id: user.id, 
+        nombre: user.usuario, 
+        usuarioKey: user.usuario, 
+        // Generamos la URL de Supabase dinámicamente usando el nombre del usuario
+        avatar: user.usuario 
+          ? `https://xngrbiwhdcyyagwvnzvq.supabase.co/storage/v1/object/public/avatars/${user.usuario}.png`
+          : 'https://xngrbiwhdcyyagwvnzvq.supabase.co/storage/v1/object/public/avatars/default.png', 
+        actual: user.puntos_semanales ?? 0, 
+        total: totalPuntos,              
+        emoji: rangoCalculado.emoji,      
+        color: obtenerColorTop(index + 1) 
+      };
+    }); // 👈 Llave de cierre del .map() corregida
 
-      if (fiestaError) throw fiestaError;
+    setRankingOficial(rankingMapeado);
 
-      setListaTiposFiesta(fiestaData || []);
-      if (fiestaData && fiestaData.length > 0) {
-        setTipoFiesta(fiestaData[0].id.toString()); 
+    // 3. Cargar Tipos de Fiesta desde la tabla
+    const { data: fiestaData, error: fiestaError } = await supabase
+      .from('tipos_fiesta')
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (fiestaError) throw fiestaError;
+
+    setListaTiposFiesta(fiestaData || []);
+    if (fiestaData && fiestaData.length > 0) {
+      setTipoFiesta(fiestaData[0].id.toString()); 
+    }
+
+    // =========================================================
+    // 4. TOTALES REFORZADOS (Evita romper si el usuario tarda en cargar)
+    // =========================================================
+    const identificarPorNombre = nombreMostrar && nombreMostrar.trim() !== "";
+    
+    if (identificarPorNombre) {
+      const usuarioActualDb = rankingMapeado.find(j => j.usuarioKey?.toLowerCase() === nombreMostrar?.toLowerCase());
+      const idUsuarioReal = usuarioActualDb ? parseInt(usuarioActualDb.id, 10) : parseInt(usuarioLogueado, 10);
+
+      let query = supabase.from('historial_formularios').select('cubatas, cervezas, chupitos, aguas, refrescos');
+
+      if (idUsuarioReal && !isNaN(idUsuarioReal)) {
+        query = query.eq('usuario', idUsuarioReal);
+      } else {
+        query = query.eq('usuario', nombreMostrar);
       }
 
-    } catch (err) {
-      console.error("Error cargando base de datos de Supabase:", err);
-    } finally {
-      setCargandoDatos(false);
-    }
-  };
+      const { data: filasHistorial, error: totalesError } = await query;
 
-  useEffect(() => {
-    inicializarDatos();
-  }, []);
+      if (!totalesError && filasHistorial) {
+        const totales = filasHistorial.reduce((acc, fila) => {
+          return {
+            cubatas: acc.cubatas + (fila.cubatas || 0),
+            cervezas: acc.cervezas + (fila.cervezas || 0),
+            chupitos: acc.chupitos + (fila.chupitos || 0),
+            aguas: acc.aguas + (fila.aguas || 0),
+            refrescos: acc.refrescos + (fila.refrescos || 0),
+          };
+        }, { cubatas: 0, cervezas: 0, chupitos: 0, aguas: 0, refrescos: 0 });
+
+        setStatsTotales(totales);
+      }
+    } else {
+      console.log("Aún no hay sesión activa de usuario, los totales se cargarán al iniciar sesión.");
+    }
+
+  } catch (err) {
+    console.error("Error cargando base de datos de Supabase:", err);
+  } finally {
+    setCargandoDatos(false);
+  }
+};
+
+useEffect(() => {
+  inicializarDatos();
+// Pasamos SIEMPRE las dos variables fijas. 
+// React se encargará de re-ejecutar la función en cuanto dejen de ser "" o null.
+}, [nombreMostrar, usuarioLogueado]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -362,7 +408,9 @@ export default function App() {
     setSesionIniciada(false); setUsuarioInput(''); setPinInput(''); setUsuarioLogueado(null); setNombreMostrar('');
   };
 
-  const liderActual = rankingOficial.length > 0 ? rankingOficial[0] : { nombre: "Cargando...", total: 0, emoji: "👑", color: "text-amber-400" };
+ const liderActual = rankingOficial.length > 0 
+  ? rankingOficial[0] 
+  : { nombre: "Cargando...", total: 0, avatar: null, emoji: "👑", color: "text-amber-400" };
   const datosUsuarioLogueado = rankingOficial.find(j => j.usuarioKey?.toLowerCase() === nombreMostrar?.toLowerCase()) || { top: '?', actual: 0, total: 0, emoji: "🪵" };
   const rangoUsuarioObj = obtenerRango(datosUsuarioLogueado.total);
 
@@ -466,57 +514,92 @@ export default function App() {
       ) : (
         <>
           {/* --- MENU PRINCIPAL --- */}
-          {seccionActiva === 'menu' && (
-            <main className="w-full max-w-md space-y-4">
-              
-              {/* --- BANNER DORADO: LÍDER ACTUAL --- */}
-              {liderActual && (
-                <div className="bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/10 border-2 border-amber-500 rounded-2xl p-4 flex items-center justify-between shadow-[0_0_15px_rgba(245,158,11,0.15)] relative overflow-hidden">
-                  {/* Destello sutil de fondo */}
-                  <div className="absolute -right-6 -top-6 text-6xl opacity-10 select-none">👑</div>
-                  
-                  <div className="flex items-center space-x-3.5">
-                    {/* Logo/Emoji del líder con fondo oscuro */}
-                    <div className="bg-gray-950/80 border border-amber-500/40 text-3xl w-14 h-14 rounded-xl flex items-center justify-center shadow-md">
-                      {liderActual.emoji || '👑'}
-                    </div>
-                    <div>
-                      <span className="text-[10px] uppercase font-black tracking-widest text-amber-400 block">Líder de la Clasificación</span>
-                      <h3 className="text-base font-black text-gray-100 leading-tight">{liderActual.nombre}</h3>
-                    </div>
-                  </div>
+{seccionActiva === 'menu' && (
+  <main className="w-full max-w-md space-y-4">
+    
+    {/* --- BANNER DORADO: LÍDER ACTUAL --- */}
+    {liderActual && (
+      <div className="bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/10 border-2 border-amber-500 rounded-2xl p-4 flex items-center justify-between shadow-[0_0_15px_rgba(245,158,11,0.15)] relative overflow-hidden">
+        {/* Destello sutil de fondo */}
+        <div className="absolute -right-6 -top-6 text-6xl opacity-10 select-none">👑</div>
+        
+        <div className="flex items-center space-x-3.5">
+          {/* Contenedor con la corona fija de siempre */}
+          <div className="bg-gray-950/80 border border-amber-500/40 text-3xl w-14 h-14 rounded-xl flex items-center justify-center shadow-md">
+            <span className="text-2xl animate-pulse">👑</span>
+          </div>
+          
+          {/* Datos del Líder */}
+          <div>
+            <p className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Líder del Aura</p>
+            <h2 className="text-base font-black text-white leading-tight">{liderActual.nombre}</h2>
+          </div>
+        </div>
 
-                  {/* Puntos actuales */}
-                  <div className="text-right">
-                    <span className="text-xl font-black text-amber-400 block">{liderActual.total}</span>
-                    <span className="text-[9px] uppercase font-bold text-gray-400 block tracking-wider">Aura Total</span>
-                  </div>
-                </div>
-              )}
+        {/* Puntos del Líder */}
+        <div className="text-right">
+          <p className="text-[10px] text-gray-400 uppercase tracking-wider">Total</p>
+          <p className="text-lg font-black text-amber-400">{liderActual.total} pts</p>
+        </div>
+      </div>
+    )}
 
-              {/* Saludo tradicional */}
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-left">
-                <h2 className="text-lg font-bold">¡Qué pasa, {nombreMostrar}! 👋</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Rango actual: <span className="text-amber-400 font-semibold">{rangoUsuarioObj.nombre} {rangoUsuarioObj.emoji}</span></p>
-              </div>
+   {/* Saludo tradicional con Avatar del Usuario Actual */}
+<div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex items-center space-x-3.5 text-left">
+  {/* Contenedor del Avatar (Fondo Transparente) */}
+  <div className="bg-transparent text-3xl w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden shrink-0">
+    {nombreMostrar && nombreMostrar.trim() !== "" ? (
+      <img 
+        src={`https://xngrbiwhdcyyagwvnzvq.supabase.co/storage/v1/object/public/avatars/${nombreMostrar}.png`} 
+        alt={`Avatar de ${nombreMostrar}`} 
+        className="w-full h-full rounded-xl object-cover"
+        onError={(e) => {
+          // Si no encuentra la foto, usa la por defecto
+          e.target.src = 'https://xngrbiwhdcyyagwvnzvq.supabase.co/storage/v1/object/public/avatars/default.png';
+        }}
+      />
+    ) : (
+      <span className="text-2xl animate-pulse">👤</span>
+    )}
+  </div>
 
-              {/* Botones de navegación */}
-              <div className="grid grid-cols-3 gap-3">
-                <button onClick={() => setSeccionActiva('ranking')} className="bg-gray-900 hover:bg-gray-800 border border-gray-800 p-4 rounded-xl flex flex-col items-center justify-center text-center transition-colors">
-                  <span className="text-xl mb-1">📊</span>
-                  <span className="text-[11px] font-bold text-gray-200">Ranking</span>
-                </button>
-                <button onClick={() => setSeccionActiva('formulario')} className="bg-gradient-to-b from-amber-500/20 to-gray-900 hover:from-amber-500/30 border border-amber-500/40 p-4 rounded-xl flex flex-col items-center justify-center text-center shadow-lg transition-all">
-                  <span className="text-xl mb-1">🥂</span>
-                  <span className="text-[11px] font-bold text-amber-400">Registrar Aura</span>
-                </button>
-                <button onClick={() => setSeccionActiva('perfil')} className="bg-gray-900 hover:bg-gray-800 border border-gray-800 p-4 rounded-xl flex flex-col items-center justify-center text-center transition-colors">
-                  <span className="text-xl mb-1">👤</span>
-                  <span className="text-[11px] font-bold text-gray-200">Mi Perfil</span>
-                </button>
-              </div>
-            </main>
-          )}
+  {/* Datos de Bienvenida */}
+  <div>
+    <h2 className="text-lg font-bold leading-tight">¡Qué pasa, {nombreMostrar}! 👋</h2>
+    <p className="text-xs text-gray-400 mt-0.5">
+      Rango actual: <span className="text-amber-400 font-semibold">{rangoUsuarioObj?.nombre} {rangoUsuarioObj?.emoji}</span>
+    </p>
+  </div>
+</div>
+
+    {/* Botones de navegación */}
+    <div className="grid grid-cols-3 gap-3">
+      <button 
+        onClick={() => setSeccionActiva('ranking')} 
+        className="bg-gray-900 hover:bg-gray-800 border border-gray-800 p-4 rounded-xl flex flex-col items-center justify-center text-center transition-colors"
+      >
+        <span className="text-xl mb-1">📊</span>
+        <span className="text-[11px] font-bold text-gray-200">Ranking</span>
+      </button>
+      
+      <button 
+        onClick={() => setSeccionActiva('formulario')} 
+        className="bg-gradient-to-b from-amber-500/20 to-gray-900 hover:from-amber-500/30 border border-amber-500/40 p-4 rounded-xl flex flex-col items-center justify-center text-center shadow-lg transition-all"
+      >
+        <span className="text-xl mb-1">🥂</span>
+        <span className="text-[11px] font-bold text-amber-400">Registrar Aura</span>
+      </button>
+      
+      <button 
+        onClick={() => setSeccionActiva('perfil')} 
+        className="bg-gray-900 hover:bg-gray-800 border border-gray-800 p-4 rounded-xl flex flex-col items-center justify-center text-center transition-colors"
+      >
+        <span className="text-xl mb-1">👤</span>
+        <span className="text-[11px] font-bold text-gray-200">Mi Perfil</span>
+      </button>
+    </div>
+  </main>
+)}
 
           {/* --- VISTA: FORMULARIO DE HISTORIAL DE FIESTA --- */}
           {seccionActiva === 'formulario' && (
@@ -634,7 +717,7 @@ export default function App() {
             </main>
           )}
 
-          {/* --- PANEL RANKING --- */}
+ {/* --- PANEL RANKING --- */}
 {seccionActiva === 'ranking' && (
   <main className="w-full max-w-md space-y-2">
     <div className="flex justify-between items-center mb-1">
@@ -650,10 +733,30 @@ export default function App() {
       return (
         <div key={j.nombre} className={`flex items-center justify-between p-3 rounded-xl border ${esUsuarioActual ? 'bg-amber-500/10 border-amber-500/40' : 'bg-gray-900/40 border-gray-800/60'}`}>
           <div className="flex items-center gap-3">
+            {/* Puesto en el top */}
             <span className={`text-sm font-black w-5 text-center ${j.color}`}>{j.top}</span>
+            
+            {/* Avatar del Usuario (Contenedor Transparente) */}
+            <div className="bg-transparent w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
+              {j.avatar ? (
+                <img 
+                  src={j.avatar} 
+                  alt={`Avatar de ${j.nombre}`} 
+                  className="w-full h-full rounded-lg object-cover"
+                  onError={(e) => {
+                    // Fallback si falla la foto específica de este usuario
+                    e.target.src = 'https://xngrbiwhdcyyagwvnzvq.supabase.co/storage/v1/object/public/avatars/default.png';
+                  }}
+                />
+              ) : (
+                <span className="text-base">👤</span>
+              )}
+            </div>
+
+            {/* Datos del Jugador */}
             <div>
               <h4 className="text-sm font-bold text-gray-100 flex items-center gap-1">
-                {j.nombre} <span>{j.emoji}</span>
+                {j.nombre}
                 {esUsuarioActual && <span className="text-[8px] bg-amber-400 text-black font-bold px-1 rounded">Tú</span>}
                 {esDolores && <span className="text-[9px] bg-gradient-to-r from-yellow-500 to-amber-500 text-gray-950 font-black px-1.5 py-0.5 rounded border border-yellow-400/20">Doña Campanos🏆</span>}
               </h4>
@@ -677,48 +780,98 @@ export default function App() {
 )}
 
           {/* --- PANEL PERFIL --- */}
-          {seccionActiva === 'perfil' && (
-            <main className="w-full max-w-md space-y-4">
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-center">
-                <div className="text-5xl mb-2">{rangoUsuarioObj.emoji}</div>
-                <h2 className="text-xl font-black">{nombreMostrar}</h2>
-                <p className="text-xs text-amber-400 font-bold uppercase tracking-wider">{rangoUsuarioObj.nombre}</p>
+{seccionActiva === 'perfil' && (
+  <main className="w-full max-w-md space-y-4">
+    <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-center">
+      
+      {/* AVATAR DEL USUARIO ACTUAL */}
+      <div className="bg-transparent w-20 h-20 rounded-full flex items-center justify-center overflow-hidden mx-auto mb-3 shrink-0">
+        {nombreMostrar && nombreMostrar.trim() !== "" ? (
+          <img 
+            src={`https://xngrbiwhdcyyagwvnzvq.supabase.co/storage/v1/object/public/avatars/${nombreMostrar}.png`} 
+            alt={`Avatar de ${nombreMostrar}`} 
+            className="w-full h-full rounded-full object-cover"
+            onError={(e) => {
+              // Fallback si no tiene foto asignada en el Storage
+              e.target.src = 'https://xngrbiwhdcyyagwvnzvq.supabase.co/storage/v1/object/public/avatars/default.png';
+            }}
+          />
+        ) : (
+          <span className="text-4xl">👤</span>
+        )}
+      </div>
 
-                <div className="grid grid-cols-3 gap-3 my-4">
-                  <div className="bg-gray-950 p-2.5 rounded-xl border border-gray-800/60">
-                    <span className="text-[9px] text-gray-500 uppercase block font-bold">Top</span>
-                    <span className={`text-base font-black ${datosUsuarioLogueado.top === 12 ? 'text-red-500' : 'text-amber-400'}`}>#{datosUsuarioLogueado.top}</span>
-                  </div>
-                  <div className="bg-gray-950 p-2.5 rounded-xl border border-gray-800/60">
-                    <span className="text-[9px] text-gray-500 uppercase block font-bold">Semana</span>
-                    <span className="text-base font-black text-green-400">+{datosUsuarioLogueado.actual}</span>
-                  </div>
-                  <div className="bg-gray-950 p-2.5 rounded-xl border border-gray-800/60">
-                    <span className="text-[9px] text-gray-500 uppercase block font-bold">Total</span>
-                    <span className="text-base font-black text-gray-200">{datosUsuarioLogueado.total}</span>
-                  </div>
-                </div>
+      {/* Nombre limpio sin emoji */}
+      <h2 className="text-xl font-black">{nombreMostrar}</h2>
+      
+      {/* Rango con el emoji aquí al lado */}
+      <p className="text-xs text-amber-400 font-bold uppercase tracking-wider flex items-center justify-center gap-1 mt-0.5">
+        {rangoUsuarioObj.nombre} <span>{rangoUsuarioObj.emoji}</span>
+      </p>
 
-                <div className="bg-gray-950 p-3 rounded-xl border border-gray-800/60 text-left space-y-1.5">
-                  <div className="flex justify-between items-center text-[9px] font-bold text-gray-400 uppercase">
-                    <span>Progreso de Rango</span>
-                    <span className="text-amber-400">{puntosUsuario} / {rangoSiguienteObj ? rangoSiguienteObj.limite : 'MAX'}</span>
-                  </div>
-                  <div className="w-full bg-gray-900 border border-gray-800 h-2.5 rounded-full overflow-hidden">
-                    <div className="bg-gradient-to-r from-amber-500 to-yellow-400 h-full rounded-full" style={{ width: `${porcentajeProgreso}%` }} />
-                  </div>
-                  <div className="text-[9px] text-gray-500 flex justify-between">
-                    <span>Nivel {rangoActualObj.nombre}</span>
-                    {rangoSiguienteObj ? (
-                      <span>Faltan <strong className="text-amber-400">{puntosFaltantes}</strong> pts para {rangoSiguienteObj.nombre}</span>
-                    ) : (
-                      <span className="text-yellow-400">👑 ¡RANGO MÁXIMO!</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </main>
+      <div className="grid grid-cols-3 gap-3 my-4">
+        <div className="bg-gray-950 p-2.5 rounded-xl border border-gray-800/60">
+          <span className="text-[9px] text-gray-500 uppercase block font-bold">Top</span>
+          <span className={`text-base font-black ${datosUsuarioLogueado.top === 12 ? 'text-red-500' : 'text-amber-400'}`}>#{datosUsuarioLogueado.top}</span>
+        </div>
+        <div className="bg-gray-950 p-2.5 rounded-xl border border-gray-800/60">
+          <span className="text-[9px] text-gray-500 uppercase block font-bold">Semana</span>
+          <span className="text-base font-black text-green-400">+{datosUsuarioLogueado.actual}</span>
+        </div>
+        <div className="bg-gray-950 p-2.5 rounded-xl border border-gray-800/60">
+          <span className="text-[9px] text-gray-500 uppercase block font-bold">Total</span>
+          <span className="text-base font-black text-gray-200">{datosUsuarioLogueado.total}</span>
+        </div>
+      </div>
+
+      <div className="bg-gray-950 p-3 rounded-xl border border-gray-800/60 text-left space-y-1.5 mb-4">
+        <div className="flex justify-between items-center text-[9px] font-bold text-gray-400 uppercase">
+          <span>Progreso de Rango</span>
+          <span className="text-amber-400">{puntosUsuario} / {rangoSiguienteObj ? rangoSiguienteObj.limite : 'MAX'}</span>
+        </div>
+        <div className="w-full bg-gray-900 border border-gray-800 h-2.5 rounded-full overflow-hidden">
+          <div className="bg-gradient-to-r from-amber-500 to-yellow-400 h-full rounded-full" style={{ width: `${porcentajeProgreso}%` }} />
+        </div>
+        <div className="text-[9px] text-gray-500 flex justify-between">
+          <span>Nivel {rangoActualObj.nombre}</span>
+          {rangoSiguienteObj ? (
+            <span>Faltan <strong className="text-amber-400">{puntosFaltantes}</strong> pts para {rangoSiguienteObj.nombre}</span>
+          ) : (
+            <span className="text-yellow-400">👑 ¡RANGO MÁXIMO!</span>
           )}
+        </div>
+      </div>
+
+      {/* CONTADOR HISTÓRICO DE CONSUMOS */}
+      <div className="bg-gray-950 p-3 rounded-xl border border-gray-800/60 text-left">
+        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block mb-2.5 text-center">Contadores Históricos</span>
+        <div className="grid grid-cols-5 gap-1.5">
+          <div className="text-center bg-gray-900/50 p-1.5 rounded-lg border border-gray-800/40">
+            <span className="text-[8px] text-purple-400 block font-bold uppercase">Cubatas</span>
+            <span className="text-sm font-black text-gray-200">{statsTotales.cubatas}</span>
+          </div>
+          <div className="text-center bg-gray-900/50 p-1.5 rounded-lg border border-gray-800/40">
+            <span className="text-[8px] text-yellow-500 block font-bold uppercase">Cerve/Tintos</span>
+            <span className="text-sm font-black text-gray-200">{statsTotales.cervezas}</span>
+          </div>
+          <div className="text-center bg-gray-900/50 p-1.5 rounded-lg border border-gray-800/40">
+            <span className="text-[8px] text-red-400 block font-bold uppercase">Chupis/Vinos</span>
+            <span className="text-sm font-black text-gray-200">{statsTotales.chupitos}</span>
+          </div>
+          <div className="text-center bg-gray-900/50 p-1.5 rounded-lg border border-gray-800/40">
+            <span className="text-[8px] text-blue-400 block font-bold uppercase">Agua</span>
+            <span className="text-sm font-black text-gray-200">{statsTotales.aguas}</span>
+          </div>
+          <div className="text-center bg-gray-900/50 p-1.5 rounded-lg border border-gray-800/40">
+            <span className="text-[8px] text-green-400 block font-bold uppercase">Refrescos</span>
+            <span className="text-sm font-black text-gray-200">{statsTotales.refrescos}</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+)}
         </>
       )}
     </div>
