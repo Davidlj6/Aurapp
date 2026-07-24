@@ -85,19 +85,30 @@ const [resultadoAuraIA, setResultadoAuraIA] = useState(null);
   // ==========================================
   // LÓGICA DINÁMICA DE RANGOS DESDE EL ESTADO
   // ==========================================
-  const obtenerRango = (puntos, rangosDisponibles = listaRangos) => {
-    if (!rangosDisponibles || rangosDisponibles.length === 0) {
-      return { nombre: "Cargando...", emoji: "🪵" };
+const obtenerRango = (puntos, rangosDisponibles = listaRangos) => {
+  if (!rangosDisponibles || rangosDisponibles.length === 0) {
+    return { nombre: "Cargando...", emoji: "🪵" };
+  }
+
+  // Recorremos los rangos desde el más alto al más bajo
+  for (let i = rangosDisponibles.length - 1; i >= 0; i--) {
+    const limiteRango = Number(rangosDisponibles[i].limite) || 0;
+    
+    // Si los puntos del usuario superan o igualan el límite del rango, es su rango actual
+    if (puntos >= limiteRango) {
+      return { 
+        nombre: rangosDisponibles[i].nombre, 
+        emoji: rangosDisponibles[i].emoji || "🪵" 
+      };
     }
-    for (let i = rangosDisponibles.length - 1; i >= 0; i--) {
-      if (puntos >= rangosDisponibles[i].get) { // Nota: Corregido según tu lógica
-        if (puntos >= rangosDisponibles[i].limite) {
-          return { nombre: rangosDisponibles[i].nombre, emoji: rangosDisponibles[i].emoji || "🪵" };
-        }
-      }
-    }
-    return { nombre: rangosDisponibles[0].nombre, emoji: rangosDisponibles[0].emoji || "🪵" };
+  }
+
+  // Fallback al primer rango si tiene menos puntos que el mínimo
+  return { 
+    nombre: rangosDisponibles[0].nombre, 
+    emoji: rangosDisponibles[0].emoji || "🪵" 
   };
+};
 
   // Inicialización de datos colectivos
   const inicializarDatos = async () => {
@@ -278,7 +289,7 @@ const manejarEvaluacionIA = async () => {
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.5-flash",
+      model: "gemini-3.1-flash-lite",
       // ⚡ OBLIGAMOS A GEMINI A RESPONDER EN JSON ESTRICTO
       generationConfig: {
         responseMimeType: "application/json",
@@ -289,9 +300,9 @@ const manejarEvaluacionIA = async () => {
       Actúa como el Juez Supremo del Aura y la Fiesta. Tu trabajo es evaluar un acontecimiento que ha ocurrido en una noche de fiesta y asignarle "Puntos de Aura".
       
       Reglas de puntuación:
-      - Un evento normal, aburrido o dar pena restará puntos: entre -100y -1 puntos.
-      - Un evento simpático, divertido o anécdota normal: entre 1 y 30 puntos.
-      - Un evento verdaderamente épico, legendario o una locura jodidamente divertida: entre 31 y 100 puntos.
+      - Un evento normal, aburrido o dar pena restará puntos: entre -1000 y -1 puntos.
+      - Un evento simpático, divertido o anécdota normal: entre 1 y 50 puntos.
+      - Un evento verdaderamente épico, legendario o una locura jodidamente divertida: entre 51 y 200 puntos.
 
       Analiza el siguiente acontecimiento: "${eventoEpico}"
 
@@ -370,38 +381,6 @@ const manejarEvaluacionIA = async () => {
 
     return pts;
   };
-
- // FUNCIÓN 1: SOLO PARA LLAMAR A LA IA
-const consultarJuezIA = async () => {
-  if (!eventoEpico.trim()) return;
-  
-  setEvaluandoIA(true);
-  setMensajeFormulario({ texto: "", tipo: "" });
-
-  try {
-    const respuestaIA = await fetch('/api/juez-aura', { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ evento: eventoEpico })
-    });
-    
-    const datosIA = await respuestaIA.json();
-    
-    if (datosIA && datosIA.veredicto) {
-      setResultadoAuraIA({
-        veredicto: datosIA.veredicto,
-        puntos: parseInt(datosIA.puntos) || 0
-      });
-    } else {
-      setResultadoAuraIA({ veredicto: "El juez no se pronuncia.", puntos: 0 });
-    }
-  } catch (error) {
-    console.error("Error con la IA:", error);
-    setMensajeFormulario({ texto: "❌ El juez IA no responde. Revisa tu servidor.", tipo: "error" });
-  } finally {
-    setEvaluandoIA(false);
-  }
-};
 
 // FUNCIÓN 2: EL ENVÍO DE SIEMPRE A SUPABASE (Modificado para sumar todo)
 const handleEnviarHistorial = async (e) => {
